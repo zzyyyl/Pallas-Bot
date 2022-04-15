@@ -55,7 +55,7 @@ async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
     if not answers:
         return
 
-    delay = random.randint(2, 5)
+    delay = random.uniform(1, 2)
     for item in answers:
         logger.info(
             "repeater | ready to send [{}] to group [{}]".format(item, event.group_id))
@@ -75,7 +75,7 @@ async def _(bot: Bot, event: GroupMessageEvent, state: T_State):
                     str(item), event.group_id))
                 Chat.ban(event.group_id, str(item))
                 break
-        delay = random.randint(1, 3)
+        delay = random.uniform(0.5, 1)
 
 
 async def is_reply(bot: Bot, event: GroupMessageEvent, state: T_State) -> bool:
@@ -148,7 +148,7 @@ async def speak_up():
             'message': msg,
             'group_id': group_id
         })
-        await asyncio.sleep(random.randint(2, 5))
+        await asyncio.sleep(random.uniform(0.5, 1))
 
 
 update_sched = require('nonebot_plugin_apscheduler').scheduler
