@@ -504,7 +504,11 @@ class Chat:
             return
 
         # 回复别人的，不学
-        if '[CQ:reply,' in raw_message:
+        if '[CQ:reply,' in raw_message || '[CQ:reply,' in pre_msg['raw_message']:
+            return
+
+        # at 别人的，不学
+        if '[CQ:at,qq=' in raw_message || '[CQ:at,qq=' in pre_msg['raw_message']:
             return
 
         keywords = self.chat_data.keywords
