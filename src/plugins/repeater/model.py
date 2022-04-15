@@ -327,7 +327,9 @@ class Chat:
             if not messages:
                 continue
 
-            speak = random.choice(random.choice(messages))
+            messages = random.choice(messages)
+            speak = random.choices([m['message'] for m in messages], weights=[
+                m['count'] for m in messages])[0]
 
             with Chat._reply_lock:
                 Chat._reply_dict[group_id].append({
@@ -550,9 +552,38 @@ class Chat:
                 })
                 # 不是纯文本的时候，raw_message 是完全一样的，没必要 push
                 if self.chat_data.is_plain_text:
-                    update_value['$push'] = {
-                        f'answers.{answer_index}.messages': raw_message
-                    }
+                    message_index = next((idx for idx, answer in enumerate(context['answers'][answer_index]['messages'])
+                                         # 历史遗留问题，老版本的数据 messages 字段是 list of str
+                                         if ((type(answer) == dict) and (answer['message'] == raw_message))), -1)
+                    if message_index != -1:
+                        # 历史遗留问题，老版本的数据 messages 字段是 list of str，这里加以转换
+                        if type(context['answers'][answer_index]['messages'][message_index]) == str:
+                            new_messages_map = {}
+                            for messages in context['answers'][answer_index]['messages']:
+                                if type(messages) == dict:
+                                    if messages['message'] not in new_messages_map:
+                                        new_messages_map.update({messages['message']: 0})
+                                    new_messages_map[messages['message']] += message['count']
+                                elif type(messages) == str:
+                                    if messages not in new_messages_map:
+                                        new_messages_map.update({messages: 0})
+                                    new_messages_map[messages] += 1
+                            new_messages = [{'message': message, 'count': count} for message, count in new_messages_map.items()]
+                            update_value['$set'].update({
+                                    f'answers.{answer_index}.messages': new_messages
+                                }
+                            )
+                        else:
+                            update_value['$inc'].update({
+                                f'answers.{answer_index}.messages.{message_index}.count': 1
+                            })
+                    else:
+                        update_value['$push'] = {
+                            f'answers.{answer_index}.messages': {
+                                'message': raw_message,
+                                'count': 1
+                            }
+                        }
             else:
                 update_value['$push'] = {
                     'answers': {
@@ -561,7 +592,10 @@ class Chat:
                         'count': 1,
                         'time': cur_time,
                         'messages': [
-                            raw_message
+                            {
+                                'message': raw_message,
+                                'count': 1
+                            }
                         ]
                     }
                 }
@@ -579,7 +613,10 @@ class Chat:
                         'count': 1,
                         'time': cur_time,
                         'messages': [
-                            raw_message
+                            {
+                                'message': raw_message,
+                                'count': 1
+                            }
                         ]
                     }
                 ]
@@ -629,14 +666,47 @@ class Chat:
             else:
                 pre_answer = dst[answer_key]
                 pre_answer['count'] += answer['count']
+                for m in answer['messages']:
+                    message_index = next((idx for idx, pre_answer_messages in enumerate(pre_answer['messages'])
+                                         if pre_answer_messages['message'] == m['message']), -1)
+                    if message_index != -1:
+                        pre_answer['messages'][message_index]['count'] += m['count']
+                    else:
+                        pre_answer['messages'].append(m)
+
                 pre_answer['messages'] += answer['messages']
 
-        for answer in context['answers']:
+        def convert_messages(context, answer_index):
+            new_messages_map = {}
+            for messages in context['answers'][answer_index]['messages']:
+                if type(messages) == dict:
+                    if messages['message'] not in new_messages_map:
+                        new_messages_map.update({messages['message']: 0})
+                    new_messages_map[messages['message']] += message['count']
+                elif type(messages) == str:
+                    if messages not in new_messages_map:
+                        new_messages_map.update({messages: 0})
+                    new_messages_map[messages] += 1
+            new_messages = [{'message': message, 'count': count} for message, count in new_messages_map.items()]
+            update_value = {
+                '$set': {
+                    f'answers.{answer_index}.messages': new_messages
+                }
+            }
+            context_mongo.update_one({'keywords': context['keywords']}, update_value)
+            return new_messages
+
+        for idx, answer in enumerate(context['answers']):
             answer_key = answer['keywords']
             if answer_key in ban_keywords or answer['count'] < answer_count_threshold:
                 continue
 
-            sample_msg = answer['messages'][0]
+            for item in answer['messages']:
+                if type(item) == str:
+                    answer['messages'] = convert_messages(context, idx)
+                    break
+
+            sample_msg = answer['messages'][0]['message']
             if self.chat_data.is_image and '[CQ:' not in sample_msg:
                 # 图片消息不回复纯文本。图片经常是表情包，后面的纯文本啥都有，很乱
                 continue
@@ -665,7 +735,8 @@ class Chat:
         final_answer = random.choices(list(candidate_answers.values()), weights=[
             # 防止某个回复权重太大，别的都 Roll 不到了
             min(answer['count'], 10) for answer in candidate_answers.values()])[0]
-        answer_str = random.choice(final_answer['messages'])
+        answer_str = random.choices([m['message'] for m in final_answer['messages']], weights=[
+            m['count'] for m in final_answer['messages']])[0]
         answer_keywords = final_answer['keywords']
 
         if 0 < answer_str.count('，') <= 3 and random.random() < Chat.split_probability:
